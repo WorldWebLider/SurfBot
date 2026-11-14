@@ -15,7 +15,19 @@ android {
         versionCode = 2
         versionName = "1.1"
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    // One fixed key for every build, so a new APK installs over the old one.
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("surfbot.keystore")
+            storePassword = "surfbot123"
+            keyAlias = "surfbot"
+            keyPassword = "surfbot123"
+        }
+    }
+    buildTypes {
+        debug { signingConfig = signingConfigs.getByName("fixed") }
+        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("fixed") }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
