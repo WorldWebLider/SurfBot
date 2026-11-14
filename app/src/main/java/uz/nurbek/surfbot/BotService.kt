@@ -387,12 +387,22 @@ class BotService : Service() {
             FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-        var x0 = 0f; var y0 = 0f; var t0 = 0L
+        var x0 = 0f; var y0 = 0f
+        var fired = false
         var snap: ByteArray? = null
         v.setOnTouchListener { _, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; t0 = SystemClock.uptimeMillis(); snap = lastSmall }
-                MotionEvent.ACTION_UP -> userGesture(x0, y0, e.rawX, e.rawY, SystemClock.uptimeMillis() - t0, snap)
+                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; fired = false; snap = lastSmall }
+                // Fire as soon as the direction is clear — don't wait for the finger to lift.
+                MotionEvent.ACTION_MOVE -> if (!fired && hypot(e.rawX - x0, e.rawY - y0) > screenW * 0.035f) {
+                    fired = true
+                    userSwipe(x0, y0, e.rawX - x0, e.rawY - y0, snap)
+                }
+                MotionEvent.ACTION_UP -> if (!fired) {
+                    val dx = e.rawX - x0; val dy = e.rawY - y0
+                    if (hypot(dx, dy) < screenW * 0.035f) passThrough(Path().apply { moveTo(x0, y0) }, 35L)
+                    else userSwipe(x0, y0, dx, dy, snap)
+                }
             }
             true
         }
@@ -409,21 +419,20 @@ class BotService : Service() {
         touchParams = null
     }
 
-    private fun userGesture(x0: Float, y0: Float, x1: Float, y1: Float, dur: Long, snap: ByteArray?) {
-        val dx = x1 - x0
-        val dy = y1 - y0
-        val isTap = hypot(dx, dy) < screenW * 0.05f
-        val path = Path().apply { moveTo(x0, y0); if (!isTap) lineTo(x1, y1) }
-        if (!isTap) {
-            val label = if (abs(dx) > abs(dy)) {
-                if (dx < 0) Action.LEFT else Action.RIGHT
-            } else {
-                if (dy < 0) Action.JUMP else Action.ROLL
-            }
-            lastUserSwipe = SystemClock.uptimeMillis()
-            snap?.let { recorder?.add(label, it) }
+    /** Save the swipe for training, then send a short, fast swipe in the same direction to the game. */
+    private fun userSwipe(x0: Float, y0: Float, dx: Float, dy: Float, snap: ByteArray?) {
+        val horizontal = abs(dx) > abs(dy)
+        val label = if (horizontal) {
+            if (dx < 0) Action.LEFT else Action.RIGHT
+        } else {
+            if (dy < 0) Action.JUMP else Action.ROLL
         }
-        passThrough(path, dur.coerceIn(40L, 250L))
+        lastUserSwipe = SystemClock.uptimeMillis()
+        snap?.let { recorder?.add(label, it) }
+        val len = screenW * 0.15f
+        val ex = if (horizontal) x0 + (if (dx < 0) -len else len) else x0
+        val ey = if (horizontal) y0 else y0 + (if (dy < 0) -len else len)
+        passThrough(Path().apply { moveTo(x0, y0); lineTo(ex, ey) }, 35L)
     }
 
     private fun passThrough(path: Path, dur: Long) {
@@ -431,6 +440,7 @@ class BotService : Service() {
         val lp = touchParams ?: return
         lp.flags = lp.flags or FLAG_NOT_TOUCHABLE
         wm.updateViewLayout(v, lp)
+        // One frame for the window manager to apply the flag, then inject.
         main.postDelayed({
             val restore = {
                 touchLayer?.let { tl -> lp.flags = lp.flags and FLAG_NOT_TOUCHABLE.inv(); wm.updateViewLayout(tl, lp) }
@@ -438,7 +448,7 @@ class BotService : Service() {
             }
             val g = GestureService.instance
             if (g == null || !g.perform(path, dur) { main.post { restore() } }) restore()
-        }, 16)
+        }, 8)
     }
 
     // ---------- shutdown ----------
