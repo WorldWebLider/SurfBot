@@ -332,7 +332,7 @@ class BotService : Service() {
             setTextColor(Color.WHITE)
             alpha = 0.45f
         }
-        val size = (34 * d).toInt()
+        val size = (24 * d).toInt()
         val lp = WindowManager.LayoutParams(
             size, size, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT
@@ -365,13 +365,23 @@ class BotService : Service() {
 
     private fun updateBubble() {
         val tv = bubble ?: return
-        tv.text = if (mode == Mode.BOT) "AI" else "REC"
+        tv.text = ""  // no letters: nothing on stream hints at a bot
         val color = when {
             !active -> Color.GRAY
             mode == Mode.BOT -> Color.rgb(30, 160, 70)
             else -> Color.rgb(200, 40, 40)
         }
-        tv.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+        // The ring shows the mode even while off (grey fill + green/red ring).
+        val ring = when (mode) {
+            Mode.BOT -> Color.rgb(30, 160, 70)
+            Mode.REC -> Color.rgb(200, 40, 40)
+        }
+        val d = resources.displayMetrics.density
+        tv.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+            setStroke((2 * d).toInt(), ring)
+        }
     }
 
     // ---------- recording your play ----------
