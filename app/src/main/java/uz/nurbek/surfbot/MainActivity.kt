@@ -6,7 +6,9 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -53,7 +55,33 @@ class MainActivity : Activity() {
         sw("Xavfda skeytbord ishlatish (har o'yinda 1 marta)", { cfg.hoverboard }, { cfg.hoverboard = it })
         sw("Mystery box'larni ochish", { cfg.openBoxes }, { cfg.openBoxes = it })
 
-        title("4. O'rgatish")
+        title("4. YouTube strim va video")
+        TextView(this).apply {
+            textSize = 13f
+            text = "YouTube Studio → Jonli efir → Stream key'ni nusxalab shu yerga qo'ying. Bot ishga tushirilgan bo'lishi kerak."
+        }.also { l.addView(it) }
+        val keyField = EditText(this).apply {
+            hint = "Stream key"
+            setText(cfg.streamKey)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }.also { l.addView(it) }
+        btn("Strimni boshlash") {
+            cfg.streamKey = keyField.text.toString()
+            val bot = BotService.instance
+            when {
+                bot == null -> toast("Avval botni ishga tushiring (2-bo'lim)")
+                !bot.startStream(cfg.streamKey) -> toast("Stream key kiriting")
+                else -> toast("Ulanmoqda…")
+            }
+        }
+        btn("Strimni to'xtatish") { BotService.instance?.stopStream(); toast("Strim to'xtatildi") }
+        btn("Videoga yozishni boshlash") {
+            BotService.instance?.startRecording() ?: toast("Avval botni ishga tushiring")
+        }
+        btn("Videoga yozishni to'xtatish (Galereyaga saqlanadi)") { BotService.instance?.stopRecording() }
+        sw("Reklama paytida strimda pauza ekrani", { cfg.hideAds }, { cfg.hideAds = it })
+
+        title("5. O'rgatish")
         btn("Yozuvlarni yuborish (Google Drive'ga)") { shareRecordings() }
         btn("O'rgatilgan modelni yuklash (model.tflite)") {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -73,8 +101,13 @@ class MainActivity : Activity() {
         }.also { l.addView(it) }
 
         setContentView(ScrollView(this).apply { addView(l) })
-        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
+        // Notifications + game sound capture for the stream (asked once).
+        val perms = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) perms += android.Manifest.permission.POST_NOTIFICATIONS
+        requestPermissions(perms.toTypedArray(), 9)
     }
+
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
     override fun onResume() { super.onResume(); refresh() }
 
@@ -86,6 +119,8 @@ class MainActivity : Activity() {
         status.text = "Suzuvchi oyna: ${if (overlay) "✅" else "❌"}\n" +
             "Maxsus imkoniyatlar: ${if (acc) "✅" else "❌"}\n" +
             "Bot: ${if (BotService.instance != null) "ishlayapti" else "o'chiq"}\n" +
+            "Strim: ${if (BotService.instance?.isStreaming == true) "efirda 🔴" else "yo'q"}" +
+            "${if (BotService.instance?.isRecording == true) " · video yozilyapti" else ""}\n" +
             "Miya: ${if (model) "o'rgatilgan model" else "qoidalar (1-versiya)"}\n" +
             "Yozilgan namunalar: $recs"
     }

@@ -1,7 +1,23 @@
 package uz.nurbek.surfbot
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ContentValues
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.os.Environment
+import android.provider.MediaStore
+import com.pedro.common.ConnectChecker
+import com.pedro.encoder.input.gl.render.RenderMode
+import com.pedro.encoder.input.gl.render.filters.`object`.ImageFilterRender
+import com.pedro.encoder.input.sources.audio.AudioSource
+import com.pedro.encoder.input.sources.audio.InternalAudioSource
+import com.pedro.encoder.input.sources.audio.NoAudioSource
+import com.pedro.encoder.input.sources.video.ScreenSource
+import com.pedro.library.rtmp.RtmpStream
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -123,6 +139,11 @@ class BotService : Service() {
         return if (f.exists()) try { ModelBrain(f) } catch (e: Exception) { RuleBrain() } else RuleBrain()
     }
 
+    /**
+     * One screen capture feeds everything (Android allows only one at a time):
+     * ScreenSource -> GL -> (a) small preview into ImageReader for the bot,
+     *                      (b) encoder for YouTube stream and/or mp4 recording.
+     */
     private fun startCapture(data: Intent) {
         val mpm = getSystemService(MediaProjectionManager::class.java)
         val p = mpm.getMediaProjection(Activity.RESULT_OK, data)
@@ -131,18 +152,149 @@ class BotService : Service() {
         }, main)
         projection = p
 
+        val audio: AudioSource =
+            if (Build.VERSION.SDK_INT >= 29 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+                InternalAudioSource(p) else NoAudioSource()
+        val s = RtmpStream(this, checker, ScreenSource(this, p), audio)
+        streamW = 720
+        streamH = ((720L * screenH / screenW).toInt()) and 1.inv()
+        s.prepareVideo(streamW, streamH, 3_500_000, 30)
+        s.prepareAudio(44100, true, 128_000)
+        stream = s
+
         val t = HandlerThread("cap").also { it.start() }
         capThread = t
-        val capHandler = Handler(t.looper)
-        val w = screenW / 4
-        val h = screenH / 4
+        val w = (screenW / 4) and 1.inv()
+        val h = (screenH / 4) and 1.inv()
         val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
-        r.setOnImageAvailableListener({ onImage(it) }, capHandler)
+        r.setOnImageAvailableListener({ onImage(it) }, Handler(t.looper))
         reader = r
-        vd = p.createVirtualDisplay(
-            "surfbot", w, h, maxOf(1, resources.displayMetrics.densityDpi / 4),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, null, capHandler
-        )
+        s.startPreview(r.surface, w, h)
+    }
+
+    // ---------- YouTube stream & mp4 recording ----------
+
+    private var stream: RtmpStream? = null
+    private var streamW = 720
+    private var streamH = 1560
+    @Volatile var streamWanted = false
+        private set
+    private var streamUrl = ""
+    private var recordFile: File? = null
+    private var pauseShown = false
+    private var pauseFilter: ImageFilterRender? = null
+    private var unknownSince = 0L
+
+    val isStreaming get() = stream?.isStreaming == true
+    val isRecording get() = stream?.isRecording == true
+
+    private fun toast(msg: String) = main.post { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+
+    private val checker = object : ConnectChecker {
+        override fun onConnectionStarted(url: String) {}
+        override fun onConnectionSuccess() { toast("Strim boshlandi ✅") }
+        override fun onConnectionFailed(reason: String) {
+            toast("Strim uzildi ($reason). 5 soniyadan keyin qayta ulanadi…")
+            main.post {
+                stream?.stopStream()
+                main.postDelayed({ if (streamWanted) startStreamInternal() }, 5000)
+            }
+        }
+        override fun onDisconnect() {}
+        override fun onAuthError() { toast("Stream key noto'g'ri"); main.post { stopStream() } }
+        override fun onAuthSuccess() {}
+    }
+
+    fun startStream(key: String): Boolean {
+        if (key.isBlank()) return false
+        streamUrl = "rtmp://a.rtmp.youtube.com/live2/$key"
+        streamWanted = true
+        startStreamInternal()
+        return true
+    }
+
+    private fun startStreamInternal() {
+        val s = stream ?: return
+        if (s.isStreaming) return
+        try { s.startStream(streamUrl) } catch (e: Exception) { toast("Strim xatosi: ${e.message}") }
+    }
+
+    fun stopStream() {
+        streamWanted = false
+        stream?.let { if (it.isStreaming) it.stopStream() }
+    }
+
+    fun startRecording() {
+        val s = stream ?: return
+        if (s.isRecording) return
+        val dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: filesDir
+        val f = File(dir, "surfbot_${System.currentTimeMillis()}.mp4")
+        recordFile = f
+        try {
+            s.startRecord(f.absolutePath) { }
+            toast("Video yozilyapti")
+        } catch (e: Exception) { toast("Yozish xatosi: ${e.message}") }
+    }
+
+    fun stopRecording() {
+        val s = stream ?: return
+        if (!s.isRecording) return
+        s.stopRecord()
+        val f = recordFile ?: return
+        // Give the muxer a moment to finish, then put the video in the Gallery (Movies/SurfBot).
+        main.postDelayed({ Thread { saveToGallery(f) }.start() }, 800)
+    }
+
+    private fun saveToGallery(f: File) {
+        if (Build.VERSION.SDK_INT < 29 || !f.exists()) { toast("Video saqlandi: ${f.name}"); return }
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, f.name)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/SurfBot")
+            }
+            val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return
+            contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
+            f.delete()
+            toast("Video Galereyaga saqlandi (Movies/SurfBot)")
+        } catch (e: Exception) { toast("Galereyaga saqlab bo'lmadi: ${e.message}") }
+    }
+
+    /** While an ad / unknown screen is up, viewers see a pause card instead. The bot still sees the real screen. */
+    private fun updatePause(s: Screen, t: Long) {
+        val live = isStreaming || isRecording
+        if (s == Screen.UNKNOWN) { if (unknownSince == 0L) unknownSince = t } else unknownSince = 0L
+        val want = live && cfg.hideAds && unknownSince != 0L && t - unknownSince > 600
+        if (want == pauseShown) return
+        pauseShown = want
+        val gl = stream?.getGlInterface() ?: return
+        if (want) {
+            val f = ImageFilterRender().apply {
+                setImage(pauseBitmap())
+                setScale(100f, 100f)
+                setPosition(0f, 0f)
+                renderMode = RenderMode.OUTPUT  // stream/recording only, not the bot's view
+            }
+            pauseFilter = f
+            gl.addFilter(f)
+        } else {
+            pauseFilter?.let { gl.removeFilter(it) }
+            pauseFilter = null
+        }
+    }
+
+    private var pauseBmp: Bitmap? = null
+    private fun pauseBitmap(): Bitmap = pauseBmp ?: run {
+        val b = Bitmap.createBitmap(streamW, streamH, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        c.drawColor(Color.rgb(16, 24, 32))
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER }
+        p.textSize = streamW * 0.09f
+        c.drawText("Bir daqiqa…", streamW / 2f, streamH * 0.47f, p)
+        p.textSize = streamW * 0.045f
+        p.color = Color.rgb(170, 180, 190)
+        c.drawText("O'yin hozir davom etadi", streamW / 2f, streamH * 0.53f, p)
+        b.also { pauseBmp = it }
     }
 
     // ---------- frames ----------
@@ -150,7 +302,8 @@ class BotService : Service() {
     private fun onImage(r: ImageReader) {
         val img = try { r.acquireLatestImage() } catch (e: Exception) { null } ?: return
         try {
-            if (!active) return
+            // Frames are read even while the bot is off: the stream's ad-pause needs them.
+            if (!active && !isStreaming && !isRecording) return
             val plane = img.planes[0]
             val buf = plane.buffer
             val ps = plane.pixelStride
@@ -171,7 +324,10 @@ class BotService : Service() {
                 }
             }
             val f = Frame(w, h, px, SystemClock.uptimeMillis())
-            if (mode == Mode.BOT) autoStep(f) else recStep(f)
+            val s = ScreenReader.read(f)
+            updatePause(s, f.t)
+            if (!active) return
+            if (mode == Mode.BOT) autoStep(f, s) else recStep(f)
         } catch (e: Exception) {
             // Never crash mid-stream because of one bad frame.
         } finally {
@@ -191,8 +347,7 @@ class BotService : Service() {
     private var boardsUsed = 0
     private var lastBoard = 0L
 
-    private fun autoStep(f: Frame) {
-        val s = ScreenReader.read(f)
+    private fun autoStep(f: Frame, s: Screen) {
         if (s != screen) { screen = s; screenSince = f.t; menuDelay = Human.menuWait() }
 
         if (s == Screen.PLAYING) {
@@ -468,6 +623,16 @@ class BotService : Service() {
         removeTouchLayer()
         bubble?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         recorder?.close()
+        streamWanted = false
+        stream?.let { s ->
+            try {
+                if (s.isStreaming) s.stopStream()
+                if (s.isRecording) { s.stopRecord(); recordFile?.let { f -> Thread { saveToGallery(f) }.start() } }
+                if (s.isOnPreview) s.stopPreview()
+                s.release()
+            } catch (e: Exception) {}
+        }
+        stream = null
         vd?.release()
         reader?.close()
         projection?.stop()

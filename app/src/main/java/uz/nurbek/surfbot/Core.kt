@@ -25,6 +25,11 @@ class Settings(ctx: android.content.Context) {
         get() = p.getInt("maxBoards", 1); set(v) { p.edit().putInt("maxBoards", v).apply() }
     var openBoxes: Boolean
         get() = p.getBoolean("openBoxes", true); set(v) { p.edit().putBoolean("openBoxes", v).apply() }
+    var streamKey: String
+        get() = p.getString("streamKey", "") ?: ""; set(v) { p.edit().putString("streamKey", v.trim()).apply() }
+    /** Show a pause card on stream/recording while an ad or unknown screen is up. */
+    var hideAds: Boolean
+        get() = p.getBoolean("hideAds", true); set(v) { p.edit().putBoolean("hideAds", v).apply() }
 }
 
 /** One captured screen frame, RGB packed as 0xRRGGBB. */
