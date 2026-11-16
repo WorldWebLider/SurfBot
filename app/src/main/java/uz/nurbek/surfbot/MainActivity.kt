@@ -84,16 +84,22 @@ class MainActivity : Activity() {
 
         title("5. O'rgatish")
         btn("Yozuvlarni yuborish (Google Drive'ga)") { shareRecordings() }
-        btn("Yuborilgan yozuvlarni o'chirish (joy bo'shatish)") {
-            if (BotService.instance?.active == true) toast("Avval botni o'chiring")
-            else { File(filesDir, "rec").listFiles()?.forEach { it.delete() }; refresh(); toast("O'chirildi") }
+        btn("Hozir o'qitish (telefonda, bir necha daqiqa)") {
+            val started = Trainer.start(this, background = false) { msg -> runOnUiThread { toast(msg); refresh() } }
+            toast(if (started) "O'qitish boshlandi. Ilovani yopmang." else "O'qitish allaqachon ketyapti")
+        }
+        btn("Barcha yozuvlarni o'chirish (joy bo'shatish)") {
+            if (BotService.instance?.active == true || Trainer.running) toast("Avval botni o'chiring")
+            else { File(filesDir, "rec").listFiles()?.forEach { it.delete() }; cfg.trainedAt = 0; refresh(); toast("O'chirildi") }
         }
         btn("O'rgatilgan modelni yuklash (model.tflite)") {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
             }, reqModel)
         }
-        btn("Modelni o'chirish (1-versiyaga qaytish)") { File(filesDir, "model.tflite").delete(); refresh() }
+        btn("Modelni o'chirish (1-versiyaga qaytish)") {
+            File(filesDir, "model.tflite").delete(); File(filesDir, Trainer.MODEL).delete(); cfg.trainedAt = 0; refresh()
+        }
 
         TextView(this).apply {
             textSize = 13f
@@ -114,19 +120,26 @@ class MainActivity : Activity() {
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
-    override fun onResume() { super.onResume(); refresh() }
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tick = object : Runnable { override fun run() { refresh(); ui.postDelayed(this, 2000) } }
+
+    override fun onResume() { super.onResume(); ui.post(tick) }
+    override fun onPause() { ui.removeCallbacks(tick); super.onPause() }
 
     private fun refresh() {
         val overlay = Sys.canDrawOverlays(this)
         val acc = GestureService.instance != null
         val model = File(filesDir, "model.tflite").exists()
+        val net = File(filesDir, Trainer.MODEL).exists()
+        val train = if (Trainer.running) Trainer.status else cfg.lastTrain
         val recs = File(filesDir, "rec").listFiles()?.sumOf { it.length() / (1 + Frame.SMALL_W * Frame.SMALL_H) } ?: 0L
         status.text = "Suzuvchi oyna: ${if (overlay) "✅" else "❌"}\n" +
             "Maxsus imkoniyatlar: ${if (acc) "✅" else "❌"}\n" +
             "Bot: ${if (BotService.instance != null) "ishlayapti" else "o'chiq"}\n" +
             "Strim: ${if (BotService.instance?.isStreaming == true) "efirda 🔴" else "yo'q"}" +
             "${if (BotService.instance?.isRecording == true) " · video yozilyapti" else ""}\n" +
-            "Miya: ${if (model) "o'rgatilgan model" else "qoidalar (1-versiya)"}\n" +
+            "Miya: ${if (net) "telefonda o'rgatilgan model" else if (model) "o'rgatilgan model" else "qoidalar (1-versiya)"}\n" +
+            (if (train.isNotEmpty()) "O'qitish: $train\n" else "") +
             "Yozilgan namunalar: $recs"
     }
 

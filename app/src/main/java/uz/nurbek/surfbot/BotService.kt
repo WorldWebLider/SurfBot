@@ -134,9 +134,24 @@ class BotService : Service() {
         }
     }
 
+    private var brainStamp = 0L
+
+    /** Priority: model trained on this phone, then an imported .tflite, then the rules. */
     private fun loadBrain(): Brain {
+        val net = File(filesDir, Trainer.MODEL)
+        brainStamp = net.lastModified()
+        if (net.exists()) try { return NetBrain(net) } catch (e: Exception) {}
         val f = File(filesDir, "model.tflite")
         return if (f.exists()) try { ModelBrain(f) } catch (e: Exception) { RuleBrain() } else RuleBrain()
+    }
+
+    /** Between runs: pick up a freshly trained model, and retrain when enough new play was collected. */
+    private fun betweenRuns() {
+        if (File(filesDir, Trainer.MODEL).lastModified() != brainStamp) brain = loadBrain()
+        if (!cfg.selfLearn || Trainer.running || isStreaming) return
+        val total = Trainer.sampleCount(this)
+        if (total >= Trainer.MIN_SAMPLES && total - cfg.trainedAt >= 2000)
+            Trainer.start(this, background = true) { toast(it) }
     }
 
     /**
@@ -351,7 +366,7 @@ class BotService : Service() {
         if (s != screen) { screen = s; screenSince = f.t; menuDelay = Human.menuWait() }
 
         if (s == Screen.PLAYING) {
-            if (!inRun) { inRun = true; brain.reset(); keysUsed = 0; boardsUsed = 0 }
+            if (!inRun) { inRun = true; betweenRuns(); brain.reset(); keysUsed = 0; boardsUsed = 0 }
             (brain as? RuleBrain)?.boardAllowed =
                 cfg.hoverboard && boardsUsed < cfg.maxBoards && f.t - lastBoard > 35_000
             botStep(f)

@@ -28,6 +28,11 @@ class Settings(ctx: android.content.Context) {
     /** Bot records its own surviving play so the model can be retrained on it. */
     var selfLearn: Boolean
         get() = p.getBoolean("selfLearn", true); set(v) { p.edit().putBoolean("selfLearn", v).apply() }
+    /** Number of recorded samples that existed at the last training. */
+    var trainedAt: Long
+        get() = p.getLong("trainedAt", 0L); set(v) { p.edit().putLong("trainedAt", v).apply() }
+    var lastTrain: String
+        get() = p.getString("lastTrain", "") ?: ""; set(v) { p.edit().putString("lastTrain", v).apply() }
     var streamKey: String
         get() = p.getString("streamKey", "") ?: ""; set(v) { p.edit().putString("streamKey", v.trim()).apply() }
     /** Show a pause card on stream/recording while an ad or unknown screen is up. */

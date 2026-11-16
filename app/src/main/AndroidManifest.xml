@@ -16,6 +16,7 @@
 
     <application
         android:label="SurfBot"
+        android:largeHeap="true"
         android:icon="@android:drawable/ic_media_play"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
