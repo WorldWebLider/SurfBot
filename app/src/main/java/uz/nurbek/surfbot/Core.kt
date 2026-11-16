@@ -25,6 +25,9 @@ class Settings(ctx: android.content.Context) {
         get() = p.getInt("maxBoards", 1); set(v) { p.edit().putInt("maxBoards", v).apply() }
     var openBoxes: Boolean
         get() = p.getBoolean("openBoxes", true); set(v) { p.edit().putBoolean("openBoxes", v).apply() }
+    /** Bot records its own surviving play so the model can be retrained on it. */
+    var selfLearn: Boolean
+        get() = p.getBoolean("selfLearn", true); set(v) { p.edit().putBoolean("selfLearn", v).apply() }
     var streamKey: String
         get() = p.getString("streamKey", "") ?: ""; set(v) { p.edit().putString("streamKey", v.trim()).apply() }
     /** Show a pause card on stream/recording while an ad or unknown screen is up. */
@@ -113,14 +116,14 @@ object Human {
 }
 
 /** Stores (label, 64x112 grayscale frame) pairs: 1 + 7168 bytes per sample. */
-class Recorder(dir: File) {
+class Recorder(dir: File, prefix: String = "rec") {
     private val out: BufferedOutputStream
     var count = 0
         private set
 
     init {
         dir.mkdirs()
-        out = BufferedOutputStream(FileOutputStream(File(dir, "rec_${System.currentTimeMillis()}.bin")))
+        out = BufferedOutputStream(FileOutputStream(File(dir, "${prefix}_${System.currentTimeMillis()}.bin")))
     }
 
     @Synchronized fun add(a: Action, s: ByteArray) {

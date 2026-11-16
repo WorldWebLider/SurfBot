@@ -54,6 +54,7 @@ class MainActivity : Activity() {
         sw("Kalit bilan davom etish (har o'yinda 1 marta)", { cfg.useKeys }, { cfg.useKeys = it })
         sw("Xavfda skeytbord ishlatish (har o'yinda 1 marta)", { cfg.hoverboard }, { cfg.hoverboard = it })
         sw("Mystery box'larni ochish", { cfg.openBoxes }, { cfg.openBoxes = it })
+        sw("O'zi o'rganish: bot o'z o'yinini yozib boradi", { cfg.selfLearn }, { cfg.selfLearn = it })
 
         title("4. YouTube strim va video")
         TextView(this).apply {
@@ -83,6 +84,10 @@ class MainActivity : Activity() {
 
         title("5. O'rgatish")
         btn("Yozuvlarni yuborish (Google Drive'ga)") { shareRecordings() }
+        btn("Yuborilgan yozuvlarni o'chirish (joy bo'shatish)") {
+            if (BotService.instance?.active == true) toast("Avval botni o'chiring")
+            else { File(filesDir, "rec").listFiles()?.forEach { it.delete() }; refresh(); toast("O'chirildi") }
+        }
         btn("O'rgatilgan modelni yuklash (model.tflite)") {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"

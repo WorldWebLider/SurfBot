@@ -357,6 +357,7 @@ class BotService : Service() {
             botStep(f)
             return
         }
+        if (s == Screen.CONTINUE || s == Screen.RESULTS) selfDrop()
         if (s == Screen.RESULTS || s == Screen.MENU) inRun = false
         if (!cfg.autoRestart || pending || f.t - lastMenuAct < 1500) return
 
@@ -410,12 +411,37 @@ class BotService : Service() {
         }
     }
 
+    // ---------- self-learning: keep only moves the bot survived ----------
+
+    private class SelfSample(val t: Long, val a: Action, val s: ByteArray)
+    private val selfBuf = ArrayDeque<SelfSample>()
+    @Volatile private var selfRec: Recorder? = null
+    private var lastSelfNone = 0L
+
+    /** A sample is written to disk only after the bot stayed alive 5 more seconds. */
+    private fun selfAdd(t: Long, a: Action, f: Frame) {
+        val rec = selfRec ?: return
+        synchronized(selfBuf) {
+            selfBuf.addLast(SelfSample(t, a, f.small()))
+            while (selfBuf.isNotEmpty() && selfBuf.first().t < t - 5000) {
+                val e = selfBuf.removeFirst()
+                rec.add(e.a, e.s)
+            }
+        }
+    }
+
+    /** Crash: the last seconds led to it, so they are thrown away. */
+    private fun selfDrop() = synchronized(selfBuf) { selfBuf.clear() }
+
     private fun botStep(f: Frame) {
         if (pending) return
         val b = brain
         val a = b.decide(f)
-        if (a == Action.NONE) return
-        if (a == Action.BOARD) { boardsUsed++; lastBoard = f.t }
+        if (a == Action.NONE) {
+            if (f.t - lastSelfNone > 250) { lastSelfNone = f.t; if (Math.random() < 0.35) selfAdd(f.t, a, f) }
+            return
+        }
+        if (a == Action.BOARD) { boardsUsed++; lastBoard = f.t } else selfAdd(f.t, a, f)
         pending = true
         main.postDelayed({ doAction(a) { pending = false } }, Human.reactionDelay(b.learned))
     }
@@ -454,8 +480,16 @@ class BotService : Service() {
             if (mode == Mode.REC) {
                 recorder = Recorder(File(filesDir, "rec"))
                 addTouchLayer()
+            } else if (cfg.selfLearn) {
+                val dir = File(filesDir, "rec")
+                val used = dir.listFiles()?.sumOf { it.length() } ?: 0L
+                // Stop collecting at ~500 MB so the phone's storage is never filled.
+                if (used < 500L * 1024 * 1024) selfRec = Recorder(dir, "self")
             }
         } else {
+            selfDrop()
+            selfRec?.close()
+            selfRec = null
             removeTouchLayer()
             recorder?.let {
                 it.close()
@@ -623,6 +657,7 @@ class BotService : Service() {
         removeTouchLayer()
         bubble?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         recorder?.close()
+        selfRec?.close()
         streamWanted = false
         stream?.let { s ->
             try {
