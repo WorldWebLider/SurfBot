@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         title("5. O'rgatish")
         btn("Yozuvlarni yuborish (Google Drive'ga)") { shareRecordings() }
         btn("Hozir o'qitish (telefonda, bir necha daqiqa)") {
-            val started = Trainer.start(this, background = false) { msg -> runOnUiThread { toast(msg); refresh() } }
+            val started = Trainer.start(this, background = false, scratch = true) { msg -> runOnUiThread { toast(msg); refresh() } }
             toast(if (started) "O'qitish boshlandi. Ilovani yopmang." else "O'qitish allaqachon ketyapti")
         }
         btn("Barcha yozuvlarni o'chirish (joy bo'shatish)") {

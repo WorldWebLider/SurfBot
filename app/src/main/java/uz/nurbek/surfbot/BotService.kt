@@ -347,7 +347,7 @@ class BotService : Service() {
             val s = ScreenReader.read(f)
             updatePause(s, f.t)
             if (!active) return
-            if (mode == Mode.BOT) autoStep(f, s) else recStep(f)
+            if (mode == Mode.BOT) autoStep(f, s) else recStep(f, s)
         } catch (e: Exception) {
             // Never crash mid-stream because of one bad frame.
         } finally {
@@ -479,13 +479,27 @@ class BotService : Service() {
         if (!g.perform(path, dur) { done() }) done()
     }
 
-    private fun recStep(f: Frame) {
+    private class RecFrame(val t: Long, val s: ByteArray)
+    private val recRecent = ArrayDeque<RecFrame>()  // frames of the last 250 ms
+    private val recNone = ArrayDeque<RecFrame>()    // "do nothing" candidates, not yet confirmed
+    @Volatile private var recPlaying = false
+
+    private fun recStep(f: Frame, scr: Screen) {
         val s = f.small()
         lastSmall = s
-        // Also save "do nothing" moments so the model learns when NOT to swipe.
-        if (f.t - lastUserSwipe > 400 && f.t - lastNoneSample > 200) {
-            lastNoneSample = f.t
-            if (Math.random() < 0.35) recorder?.add(Action.NONE, s)
+        recPlaying = scr == Screen.PLAYING
+        synchronized(recRecent) {
+            // Menus, ads and result screens teach the bot nothing about running.
+            if (!recPlaying) { recRecent.clear(); recNone.clear(); return }
+            recRecent.addLast(RecFrame(f.t, s))
+            while (recRecent.first().t < f.t - 250) recRecent.removeFirst()
+            if (f.t - lastUserSwipe > 400 && f.t - lastNoneSample > 200) {
+                lastNoneSample = f.t
+                if (Math.random() < 0.35) recNone.addLast(RecFrame(f.t, s))
+            }
+            // A "do nothing" moment counts only if no swipe followed within 0.7 s.
+            while (recNone.isNotEmpty() && recNone.first().t < f.t - 700)
+                recorder?.add(Action.NONE, recNone.removeFirst().s)
         }
     }
 
@@ -507,6 +521,7 @@ class BotService : Service() {
                 if (used < 500L * 1024 * 1024) selfRec = Recorder(dir, "self")
             }
         } else {
+            synchronized(recRecent) { recRecent.clear(); recNone.clear() }
             selfDrop()
             selfRec?.close()
             selfRec = null
@@ -647,7 +662,13 @@ class BotService : Service() {
             if (dy < 0) Action.JUMP else Action.ROLL
         }
         lastUserSwipe = SystemClock.uptimeMillis()
-        snap?.let { recorder?.add(label, it) }
+        if (recPlaying) synchronized(recRecent) {
+            recNone.clear()  // the moments right before a swipe were not "do nothing"
+            snap?.let { recorder?.add(label, it) }
+            // The frames just before the finger moved show the same situation: more examples per swipe.
+            for (e in recRecent) if (e.s !== snap) recorder?.add(label, e.s)
+            recRecent.clear()
+        }
         val len = screenW * 0.12f
         val ex = if (horizontal) x0 + (if (dx < 0) -len else len) else x0
         val ey = if (horizontal) y0 else y0 + (if (dy < 0) -len else len)

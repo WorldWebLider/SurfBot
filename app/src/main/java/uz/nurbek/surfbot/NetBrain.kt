@@ -14,7 +14,8 @@ class NetBrain(file: File) : Brain {
     override fun reset() { lastAct = 0 }
 
     override fun decide(f: Frame): Action {
-        if (f.t - lastAct < 200) return Action.NONE
+        // A lane change takes ~0.4 s on screen; deciding again earlier causes double swipes.
+        if (f.t - lastAct < 400) return Action.NONE
         Net.pool(f.small(), inp, 0)
         val p = net.forward(inp, 0)
         var best = 0

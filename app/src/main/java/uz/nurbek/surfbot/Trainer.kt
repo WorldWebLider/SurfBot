@@ -27,13 +27,13 @@ object Trainer {
         File(ctx.filesDir, "rec").listFiles()?.sumOf { it.length() / REC } ?: 0L
 
     /** background = true: lowest priority, so the game keeps running smoothly meanwhile. */
-    fun start(ctx: Context, background: Boolean, onDone: ((String) -> Unit)? = null): Boolean {
+    fun start(ctx: Context, background: Boolean, scratch: Boolean = false, onDone: ((String) -> Unit)? = null): Boolean {
         if (running) return false
         running = true
         val app = ctx.applicationContext
         Thread({
             if (background) android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-            val msg = try { train(app) } catch (e: Throwable) { "O'qitishda xato: ${e.message}" }
+            val msg = try { train(app, scratch) } catch (e: Throwable) { "O'qitishda xato: ${e.message}" }
             status = msg
             running = false
             onDone?.invoke(msg)
@@ -41,7 +41,7 @@ object Trainer {
         return true
     }
 
-    private fun train(ctx: Context): String {
+    private fun train(ctx: Context, scratch: Boolean): String {
         val t0 = System.currentTimeMillis()
         val files = (File(ctx.filesDir, "rec").listFiles() ?: emptyArray())
             .filter { it.length() >= REC }
@@ -85,9 +85,10 @@ object Trainer {
         val nTr = n - nVal
 
         val modelFile = File(ctx.filesDir, MODEL)
-        val fresh = !modelFile.exists()
+        val fresh = scratch || !modelFile.exists()
         val net = if (fresh) Net() else try { Net.load(modelFile) } catch (e: Exception) { Net() }
-        val epochs = if (fresh) 8 else 4   // an existing model is only refreshed
+        // Small data sets need more passes; an existing model is only refreshed.
+        val epochs = if (fresh) (60000 / nTr).coerceIn(8, 30) else (30000 / nTr).coerceIn(4, 15)
         var lr = if (fresh) 0.02f else 0.01f
         for (ep in 0 until epochs) {
             status = "O'qitilmoqda: ${ep + 1}/$epochs"
@@ -99,7 +100,7 @@ object Trainer {
                 if (++inBatch == 16) { net.step(lr, 16); inBatch = 0 }
             }
             if (inBatch > 0) net.step(lr, inBatch)
-            lr *= 0.8f
+            lr *= 0.9f
             if (System.currentTimeMillis() - t0 > MAX_MILLIS) break
         }
 
