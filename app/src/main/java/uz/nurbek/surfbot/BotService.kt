@@ -453,14 +453,28 @@ class BotService : Service() {
     /** Crash: the last seconds led to it, so they are thrown away. */
     private fun selfDrop() = synchronized(selfBuf) { selfBuf.clear() }
 
+    private val coinEye = CoinEye()
+    private var lastBrainAct = 0L
+
     private fun botStep(f: Frame) {
         if (pending) return
         val b = brain
         val a = b.decide(f)
         if (a == Action.NONE) {
+            // Nothing dangerous: maybe step toward coins (only with a learned model; safety always comes first).
+            if (b.learned && cfg.collectCoins && f.t - lastBrainAct > 600) {
+                val c = coinEye.suggest(f)
+                if (c != Action.NONE) {
+                    pending = true
+                    main.postDelayed({ doAction(c) { pending = false } }, Human.reactionDelay(true))
+                    return
+                }
+            }
             if (f.t - lastSelfNone > 250) { lastSelfNone = f.t; if (Math.random() < 0.35) selfAdd(f.t, a, f) }
             return
         }
+        lastBrainAct = f.t
+        coinEye.reset()
         if (a == Action.BOARD) { boardsUsed++; lastBoard = f.t } else selfAdd(f.t, a, f)
         pending = true
         main.postDelayed({ doAction(a) { pending = false } }, Human.reactionDelay(b.learned))

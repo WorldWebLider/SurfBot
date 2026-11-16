@@ -54,6 +54,7 @@ class MainActivity : Activity() {
         sw("Kalit bilan davom etish (har o'yinda 1 marta)", { cfg.useKeys }, { cfg.useKeys = it })
         sw("Xavfda skeytbord ishlatish (har o'yinda 1 marta)", { cfg.hoverboard }, { cfg.hoverboard = it })
         sw("Mystery box'larni ochish", { cfg.openBoxes }, { cfg.openBoxes = it })
+        sw("Tangalarni yig'ish (xavf yo'q paytda)", { cfg.collectCoins }, { cfg.collectCoins = it })
         sw("O'zi o'rganish: bot o'z o'yinini yozib boradi", { cfg.selfLearn }, { cfg.selfLearn = it })
 
         title("4. YouTube strim va video")

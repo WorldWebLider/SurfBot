@@ -33,6 +33,9 @@ class Settings(ctx: android.content.Context) {
         get() = p.getLong("trainedAt", 0L); set(v) { p.edit().putLong("trainedAt", v).apply() }
     var lastTrain: String
         get() = p.getString("lastTrain", "") ?: ""; set(v) { p.edit().putString("lastTrain", v).apply() }
+    /** When it is safe, move to a neighbouring lane that has coins. */
+    var collectCoins: Boolean
+        get() = p.getBoolean("collectCoins", true); set(v) { p.edit().putBoolean("collectCoins", v).apply() }
     var streamKey: String
         get() = p.getString("streamKey", "") ?: ""; set(v) { p.edit().putString("streamKey", v.trim()).apply() }
     /** Show a pause card on stream/recording while an ad or unknown screen is up. */
