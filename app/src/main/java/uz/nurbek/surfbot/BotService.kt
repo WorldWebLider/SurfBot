@@ -88,6 +88,7 @@ class BotService : Service() {
     private var screenW = 0
     private var screenH = 0
     private var rowBuf = ByteArray(0)
+    private var lastFrameAt = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -319,6 +320,10 @@ class BotService : Service() {
         try {
             // Frames are read even while the bot is off: the stream's ad-pause needs them.
             if (!active && !isStreaming && !isRecording) return
+            // Recording your play needs fewer frames; this leaves the CPU to the game.
+            val now = SystemClock.uptimeMillis()
+            if (active && mode == Mode.REC && now - lastFrameAt < 66) return
+            lastFrameAt = now
             val plane = img.planes[0]
             val buf = plane.buffer
             val ps = plane.pixelStride
@@ -608,13 +613,13 @@ class BotService : Service() {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; fired = false; snap = lastSmall }
                 // Fire as soon as the direction is clear — don't wait for the finger to lift.
-                MotionEvent.ACTION_MOVE -> if (!fired && hypot(e.rawX - x0, e.rawY - y0) > screenW * 0.035f) {
+                MotionEvent.ACTION_MOVE -> if (!fired && hypot(e.rawX - x0, e.rawY - y0) > screenW * 0.022f) {
                     fired = true
                     userSwipe(x0, y0, e.rawX - x0, e.rawY - y0, snap)
                 }
                 MotionEvent.ACTION_UP -> if (!fired) {
                     val dx = e.rawX - x0; val dy = e.rawY - y0
-                    if (hypot(dx, dy) < screenW * 0.035f) passThrough(Path().apply { moveTo(x0, y0) }, 35L)
+                    if (hypot(dx, dy) < screenW * 0.022f) passThrough(Path().apply { moveTo(x0, y0) }, 25L)
                     else userSwipe(x0, y0, dx, dy, snap)
                 }
             }
@@ -643,10 +648,10 @@ class BotService : Service() {
         }
         lastUserSwipe = SystemClock.uptimeMillis()
         snap?.let { recorder?.add(label, it) }
-        val len = screenW * 0.15f
+        val len = screenW * 0.12f
         val ex = if (horizontal) x0 + (if (dx < 0) -len else len) else x0
         val ey = if (horizontal) y0 else y0 + (if (dy < 0) -len else len)
-        passThrough(Path().apply { moveTo(x0, y0); lineTo(ex, ey) }, 35L)
+        passThrough(Path().apply { moveTo(x0, y0); lineTo(ex, ey) }, 22L)
     }
 
     private fun passThrough(path: Path, dur: Long) {
@@ -662,7 +667,7 @@ class BotService : Service() {
             }
             val g = GestureService.instance
             if (g == null || !g.perform(path, dur) { main.post { restore() } }) restore()
-        }, 8)
+        }, 5)
     }
 
     // ---------- shutdown ----------
